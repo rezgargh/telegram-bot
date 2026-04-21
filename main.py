@@ -8,8 +8,12 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 
-TOKEN = os.getenv("8621161135:AAEI5bpvgHCDfMdHHJViV5-288prdeClY_8")
-CHANNEL_ID = os.getenv("anylashop")
+import os
+
+print("TOKEN:", os.environ.get("BOT_TOKEN"))
+print("CHANNEL:", os.environ.get("anylashop"))
+BOT_TOKEN = os.environ.get("8621161135:AAEI5bpvgHCDfMdHHJViV5-288prdeClY_8")
+CHANNEL_ID = os.environ.get("anylashop")
 
 
 # -------------------------
