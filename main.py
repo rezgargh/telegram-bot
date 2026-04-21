@@ -1,139 +1,112 @@
+import os
 import requests
 from bs4 import BeautifulSoup
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-from datetime import datetime
 import jdatetime
+from datetime import datetime
 
-from flask import Flask
-from threading import Thread
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-TOKEN = "8621161135:AAEI5bpvgHCDfMdHHJViV5-288prdeClY_8"
-CHANNEL_ID = "@AnylaShop"
 
-LINK, NAME, PRICE, DISCOUNT, DATE = range(5)
+TOKEN = os.getenv("8621161135:AAEI5bpvgHCDfMdHHJViV5-288prdeClY_8")
+CHANNEL_ID = os.getenv("anylashop")
 
-# ---------------- KEEP ALIVE SERVER ----------------
-web_app = Flask('')
 
-@web_app.route('/')
-def home():
-    return "Bot is alive!"
-
-def run_web():
-    web_app.run(host="0.0.0.0", port=8080)
-
-def keep_alive():
-    t = Thread(target=run_web)
-    t.start()
-
-# ---------------- IMAGE SCRAPER ----------------
-def get_best_image(url):
+# -------------------------
+# product extractor
+# -------------------------
+def extract_product(url):
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=10)
+        r = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(r.text, "html.parser")
 
-        og = soup.find("meta", property="og:image")
-        if og and og.get("content"):
-            return og["content"]
+        name = soup.find("meta", property="og:title")
+        name = name["content"] if name else "Product"
 
-        imgs = []
-        for img in soup.find_all("img"):
-            src = img.get("src")
-            if src and "http" in src:
-                imgs.append(src)
+        image = soup.find("meta", property="og:image")
+        image = image["content"] if image else None
 
-        return imgs[0] if imgs else None
+        return name, image
 
     except:
-        return None
+        return "Product", None
 
-# ---------------- DATE CONVERT ----------------
-def convert_date(day):
-    now = datetime.now()
-    g = datetime(now.year, now.month, day)
-    j = jdatetime.date.fromgregorian(date=g)
-    return j.strftime("%Y/%m/%d")
 
-# ---------------- BOT FLOW ----------------
+# -------------------------
+# Jalali date
+# -------------------------
+def to_jalali(day):
+    today = datetime.now()
+    try:
+        g = datetime(today.year, today.month, int(day))
+    except:
+        g = today
+
+    return jdatetime.date.fromgregorian(date=g).strftime("%Y/%m/%d")
+
+
+# -------------------------
+# start
+# -------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔗 لینک محصول رو بفرست:")
-    return LINK
+    await update.message.reply_text("Send: URL | PRICE | DISCOUNT | DAY")
 
-async def link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text
-    context.user_data["link"] = url
-    context.user_data["image"] = get_best_image(url)
 
-    await update.message.reply_text("📝 نام محصول:")
-    return NAME
+# -------------------------
+# handler
+# -------------------------
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        text = update.message.text
+        url, price, discount, day = [x.strip() for x in text.split("|")]
 
-async def name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["name"] = update.message.text
-    await update.message.reply_text("💰 قیمت (USD):")
-    return PRICE
+        final_price = int(price) - int(discount)
 
-async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["price"] = float(update.message.text)
-    await update.message.reply_text("🎯 تخفیف (%):")
-    return DISCOUNT
+        name, img = extract_product(url)
+        date = to_jalali(day)
 
-async def discount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["discount"] = float(update.message.text)
-    await update.message.reply_text("📅 روز ماه (مثلاً 22):")
-    return DATE
-
-async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    day = int(update.message.text)
-    jalali = convert_date(day)
-
-    name = context.user_data["name"]
-    price = context.user_data["price"]
-    discount = context.user_data["discount"]
-    img = context.user_data["image"]
-
-    final = price - (price * discount / 100)
-
-    text = f"""
+        caption = f"""
 🛍 {name}
 
-💰 قیمت: ${price}
-🔥 قیمت نهایی: ${final:.2f}
+💰 Price: ${final_price}
 
-📅 انقضا: {jalali}
+📅 Expiry: {date}
 """
 
-    if img:
-        await context.bot.send_photo(CHANNEL_ID, img, caption=text)
-    else:
-        await context.bot.send_message(CHANNEL_ID, text)
+        if img:
+            await context.bot.send_photo(CHANNEL_ID, img, caption=caption)
+        else:
+            await context.bot.send_message(CHANNEL_ID, caption)
 
-    await update.message.reply_text("✅ ارسال شد")
-    return ConversationHandler.END
+        await update.message.reply_text("✅ Posted!")
 
-# ---------------- RUN BOT ----------------
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+# -------------------------
+# main (SAFE for Render)
+# -------------------------
 def main():
-    keep_alive()
+    if not TOKEN:
+        print("❌ BOT_TOKEN missing")
+        return
 
     app = ApplicationBuilder().token(TOKEN).build()
 
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            LINK: [MessageHandler(filters.TEXT, link)],
-            NAME: [MessageHandler(filters.TEXT, name)],
-            PRICE: [MessageHandler(filters.TEXT, price)],
-            DISCOUNT: [MessageHandler(filters.TEXT, discount)],
-            DATE: [MessageHandler(filters.TEXT, date)],
-        },
-        fallbacks=[]
-    )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
-    app.add_handler(conv)
+    print("🤖 Bot running...")
 
-    print("🤖 Bot is running...")
-    app.run_polling(drop_pending_updates=True)
+    try:
+        app.run_polling(drop_pending_updates=True)
+    except RuntimeError:
+        import nest_asyncio
+        nest_asyncio.apply()
+        app.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     main()
