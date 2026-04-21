@@ -10,6 +10,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 # =========================
 # CONFIG
 # =========================
+import os
+
 TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("anylashop")  # مثلا: @anilashop
 
