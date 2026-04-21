@@ -1,156 +1,139 @@
 import requests
 from bs4 import BeautifulSoup
-from telegram import Update, InputMediaPhoto
+from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from datetime import datetime
 import jdatetime
 
-TOKEN = "8621161135:AAEI5bpvgHCDfMdHHJViV5-288prdeClY_8"
-CHANNEL_ID = "@AnylaShop"  # آیدی کانالت
+from flask import Flask
+from threading import Thread
 
-# مراحل گفتگو
+TOKEN = "8621161135:AAEI5bpvgHCDfMdHHJViV5-288prdeClY_8"
+CHANNEL_ID = "@AnylaShop"
+
 LINK, NAME, PRICE, DISCOUNT, DATE = range(5)
 
-# -----------------------------
-# استخراج بهترین عکس
-# -----------------------------
+# ---------------- KEEP ALIVE SERVER ----------------
+web_app = Flask('')
+
+@web_app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run_web():
+    web_app.run(host="0.0.0.0", port=8080)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.start()
+
+# ---------------- IMAGE SCRAPER ----------------
 def get_best_image(url):
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
+        headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
 
-        images = []
-
-        # og:image (بهترین حالت)
         og = soup.find("meta", property="og:image")
         if og and og.get("content"):
             return og["content"]
 
-        # img tag ها
+        imgs = []
         for img in soup.find_all("img"):
             src = img.get("src")
-            if src and ("http" in src):
-                images.append(src)
+            if src and "http" in src:
+                imgs.append(src)
 
-        # فیلتر عکس‌های کوچک یا لوگو
-        filtered = [img for img in images if not any(x in img.lower() for x in ["logo", "icon", "banner"])]
+        return imgs[0] if imgs else None
 
-        if filtered:
-            return filtered[0]
-
+    except:
         return None
 
-    except Exception as e:
-        print("❌ Image error:", e)
-        return None
-
-# -----------------------------
-# تبدیل تاریخ میلادی به شمسی
-# -----------------------------
-def convert_to_jalali(day):
+# ---------------- DATE CONVERT ----------------
+def convert_date(day):
     now = datetime.now()
-    g_date = datetime(now.year, now.month, day)
-    j_date = jdatetime.date.fromgregorian(date=g_date)
-    return j_date.strftime("%Y/%m/%d")
+    g = datetime(now.year, now.month, day)
+    j = jdatetime.date.fromgregorian(date=g)
+    return j.strftime("%Y/%m/%d")
 
-# -----------------------------
-# شروع
-# -----------------------------
+# ---------------- BOT FLOW ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔗 لینک محصول رو بفرست:")
     return LINK
 
-# -----------------------------
-async def get_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
     context.user_data["link"] = url
+    context.user_data["image"] = get_best_image(url)
 
-    image = get_best_image(url)
-    context.user_data["image"] = image
-
-    await update.message.reply_text("📝 نام محصول رو وارد کن:")
+    await update.message.reply_text("📝 نام محصول:")
     return NAME
 
-# -----------------------------
-async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["name"] = update.message.text
-    await update.message.reply_text("💰 قیمت اصلی (به دلار) رو وارد کن:")
+    await update.message.reply_text("💰 قیمت (USD):")
     return PRICE
 
-# -----------------------------
-async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["price"] = float(update.message.text)
-    await update.message.reply_text("🎯 درصد تخفیف رو وارد کن (مثلاً 20):")
+    await update.message.reply_text("🎯 تخفیف (%):")
     return DISCOUNT
 
-# -----------------------------
-async def get_discount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def discount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["discount"] = float(update.message.text)
-    await update.message.reply_text("📅 روز ماه میلادی رو وارد کن (مثلاً 22):")
+    await update.message.reply_text("📅 روز ماه (مثلاً 22):")
     return DATE
 
-# -----------------------------
-async def get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        day = int(update.message.text)
-        jalali_date = convert_to_jalali(day)
+async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    day = int(update.message.text)
+    jalali = convert_date(day)
 
-        name = context.user_data["name"]
-        price = context.user_data["price"]
-        discount = context.user_data["discount"]
-        image = context.user_data["image"]
+    name = context.user_data["name"]
+    price = context.user_data["price"]
+    discount = context.user_data["discount"]
+    img = context.user_data["image"]
 
-        final_price = price - (price * discount / 100)
+    final = price - (price * discount / 100)
 
-        caption = f"""
+    text = f"""
 🛍 {name}
 
-💰 قیمت اصلی: ${price}
-🔥 قیمت بعد تخفیف: ${round(final_price,2)}
+💰 قیمت: ${price}
+🔥 قیمت نهایی: ${final:.2f}
 
-📅 تاریخ انقضا: {jalali_date}
+📅 انقضا: {jalali}
 """
 
-        # ارسال به کانال
-        if image:
-            await context.bot.send_photo(chat_id=CHANNEL_ID, photo=image, caption=caption)
-        else:
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=caption)
+    if img:
+        await context.bot.send_photo(CHANNEL_ID, img, caption=text)
+    else:
+        await context.bot.send_message(CHANNEL_ID, text)
 
-        await update.message.reply_text("✅ محصول با موفقیت در کانال ارسال شد")
-
-        return ConversationHandler.END
-
-    except Exception as e:
-        await update.message.reply_text("❌ خطا در تاریخ، دوباره وارد کن")
-        return DATE
-
-# -----------------------------
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ لغو شد")
+    await update.message.reply_text("✅ ارسال شد")
     return ConversationHandler.END
 
-# -----------------------------
-# اجرای ربات
-# -----------------------------
-app = ApplicationBuilder().token(TOKEN).build()
+# ---------------- RUN BOT ----------------
+def main():
+    keep_alive()
 
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_link)],
-        NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
-        PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_price)],
-        DISCOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_discount)],
-        DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_date)],
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-)
+    app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(conv_handler)
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            LINK: [MessageHandler(filters.TEXT, link)],
+            NAME: [MessageHandler(filters.TEXT, name)],
+            PRICE: [MessageHandler(filters.TEXT, price)],
+            DISCOUNT: [MessageHandler(filters.TEXT, discount)],
+            DATE: [MessageHandler(filters.TEXT, date)],
+        },
+        fallbacks=[]
+    )
 
-print("🤖 Bot is running...")
-app.run_polling(drop_pending_updates=True)
+    app.add_handler(conv)
+
+    print("🤖 Bot is running...")
+    app.run_polling(drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
