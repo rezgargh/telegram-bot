@@ -12,7 +12,7 @@ import os
 
 print("TOKEN:", os.environ.get("BOT_TOKEN"))
 print("CHANNEL:", os.environ.get("anylashop"))
-BOT_TOKEN = os.environ.get("8621161135:AAEI5bpvgHCDfMdHHJViV5-288prdeClY_8")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("anylashop")
 
 
